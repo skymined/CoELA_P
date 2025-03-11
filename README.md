@@ -6,7 +6,7 @@ _Hongxin Zhang*, Weihua Du*, Jiaming Shan, Qinhong Zhou, Yilun Du, Joshua B. Ten
 
 Paper: [Arxiv](https://arxiv.org/abs/2307.02485)
 
-Project Website: [Co-LLM-Agents](https://vis-www.cs.umass.edu/Co-LLM-Agents/)
+Project Website: [Co-LLM-Agents](https://embodied-agi.cs.umass.edu/Co-LLM-Agents/ )
 
 ![Pipeline](assets/framework.png)
 
