@@ -6,7 +6,7 @@ _Hongxin Zhang*, Weihua Du*, Jiaming Shan, Qinhong Zhou, Yilun Du, Joshua B. Ten
 
 Paper: [Arxiv](https://arxiv.org/abs/2307.02485)
 
-Project Website: [Co-LLM-Agents](https://embodied-agi.cs.umass.edu/Co-LLM-Agents/ )
+Project Website: [CoELA](https://umass-embodied-agi.github.io/CoELA/)
 
 ![Pipeline](assets/framework.png)
 
@@ -147,10 +147,10 @@ There are more interesting cases and demos on our [website](https://vis-www.cs.u
 ## Citation
 If you find our work useful, please consider citing:
 ```
-@article{zhang2024building,
-  title={Building Cooperative Embodied Agents Modularly with Large Language Models},
+@article{zhang2023building,
+  title={Building cooperative embodied agents modularly with large language models},
   author={Zhang, Hongxin and Du, Weihua and Shan, Jiaming and Zhou, Qinhong and Du, Yilun and Tenenbaum, Joshua B and Shu, Tianmin and Gan, Chuang},
-  journal={ICLR},
-  year={2024}
+  journal={arXiv preprint arXiv:2307.02485},
+  year={2023}
 }
 ```
