@@ -18,7 +18,7 @@ class BaseAgent:
     Base agent class
     """
     def __init__(self, max_episode_length):
-
+        
         self.max_episode_length = max_episode_length
 
 

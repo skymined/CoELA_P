@@ -85,21 +85,13 @@ class LLM:
 
 		def lm_engine(source, lm_id, device):
 			if source == 'huggingface':
-				from transformers import AutoModelForCausalLM, AutoTokenizer, LLaMATokenizer, LLaMAForCausalLM
+				from transformers import AutoModelForCausalLM, AutoTokenizer #, LLaMATokenizer, LLaMAForCausalLM
 				print(f"loading huggingface model {lm_id}")
-				if 'llama' in lm_id or 'alpaca' in lm_id:
-					tokenizer = LLaMATokenizer.from_pretrained(lm_id, cache_dir='/work/pi_chuangg_umass_edu/.cahce') # '/gpfs/u/scratch/AICD/AICDhnng/.cache')
-					model = LLaMAForCausalLM.from_pretrained(lm_id, # device_map="balanced_low_0",
-															 # max_memory = {0: "10GB", 1: "20GB", 2: "20GB", 3: "20GB",4: "20GB",5: "20GB",6: "20GB",7: "20GB"},
-															 torch_dtype=torch.float16, low_cpu_mem_usage=True,
-        														load_in_8bit=False,
-															 cache_dir='/work/pi_chuangg_umass_edu/.cahce')\
-																.to(device)
-				else:
-					tokenizer = AutoTokenizer.from_pretrained(lm_id, cache_dir='/work/pi_chuangg_umass_edu/.cahce')
-					model = AutoModelForCausalLM.from_pretrained(lm_id, torch_dtype=torch.float16,
-																 pad_token_id=tokenizer.eos_token_id,
-																 cache_dir='/work/pi_chuangg_umass_edu/.cahce').to(
+				tokenizer = AutoTokenizer.from_pretrained(lm_id, cache_dir=os.path.expanduser("~/.cache/huggingface"), use_auth_token=os.getenv("HUGGINGFACE_TOKEN"), use_fast=False)
+				model = AutoModelForCausalLM.from_pretrained(lm_id, torch_dtype=torch.float16,
+																pad_token_id=tokenizer.eos_token_id,
+																cache_dir=os.path.expanduser("~/.cache/huggingface"),
+																use_auth_token=os.getenv("HUGGINGFACE_TOKEN")).to(
 						device)
 				print(f"loaded huggingface model {lm_id}")
 
