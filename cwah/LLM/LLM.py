@@ -24,7 +24,7 @@ class LLM:
 		self.agent_id = agent_id
 		self.agent_name = "Alice" if agent_id == 1 else "Bob"
 		self.oppo_name = "Alice" if agent_id == 2 else "Bob"
-		self.oppo_pronoun = "she" if agent_id == 2 else "he"
+		self.oppo_pronoun = "she" if agent_id == 2 else "he" # 그냥 궁금하다. 두개 성별 바꾸면 문제가 생기나ㅇㄷㅇ
 		self.debug = sampling_parameters.debug
 		self.goal_location = None
 		self.goal_location_id = None
@@ -43,10 +43,15 @@ class LLM:
 		self.cot = cot
 		self.source = source
 		self.lm_id = lm_id
-		self.chat = 'gpt-3.5-turbo' in lm_id or 'gpt-4' in lm_id
+		self.chat = 'gpt-3.5-turbo' in lm_id or 'gpt-4' in lm_id # 이거는 이제 OPENAI API에서만 쓰는 거임
 		self.OPENAI_KEY = None
 		self.total_cost = 0
 		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+		# =========프롬프트 가져오려고=============
+		self.meta_plan_template = pd.read_csv("LLM/prompt_metaplan.csv")
+		self.meta_prompt = self.meta_plan_template[self.meta_plan_template["type"] == "meta"]["prompt"].values[0]
+		# ========================================
 
 		if self.source == 'openai':
 			openai.api_key = os.getenv("OPENAI_KEY")
@@ -167,7 +172,7 @@ class LLM:
 		self.goal_desc, self.goal_location_with_r = self.goal2description(unsatisfied, None)
 
 
-	def goal2description(self, goals, goal_location_room):  # {predicate: count}
+	def goal2description(self, goals, goal_location_room):  # {predicate: count} # goals : 아직 충족 안된 목표
 		# print(goals)
 		map_rel_to_pred = {
 			'inside': 'into',
@@ -222,7 +227,7 @@ class LLM:
 	# 		obj2 = self.get_obj(obs, text, 2)
 	# 		return f"[{text.split(']')[0].split('[')[-1]}] {obj1} {obj2}"
 
-	def parse_answer(self, available_actions, text):
+	def parse_answer(self, available_actions, text): 
 		for i in range(len(available_actions)):
 			action = available_actions[i]
 			if action in text:
@@ -446,3 +451,213 @@ class LLM:
 					 "total_cost": self.total_cost})
 		return plan, info
 
+	# ==================================================================
+	# =============CAPO를 위한 저수준 관련 새로운 함수들을 추가 ==============
+	# ==================================================================
+
+	def run_initial_meta_plan(self, unsatisfied_goals):
+		"""
+		[Designer 역할] 목표 설명을 바탕으로 초기 메타 플랜 생성
+		(Cooperative Planning Module의 일부)
+		"""
+		# 목표 설명 -> 자연어 문장 ex. Find and put 1 pen into the basket.
+		goal_desc = self.goal2description(unsatisfied_goals, None)[0]
+
+		# LLM에게 초기 메타 플랜 생성을 요청하는 프롬프트를 구성 -> 이거는 거기서 따옴
+		prompt = self.meta_prompt.replace('$GOAL$', goal_desc)
+		prompt = prompt.replace('$AGENT_NAME$', self.agent_name).replace("$OPPO_NAME$", self.oppo_name)
+
+		# prompt = f"""
+		# 		As a cooperative AI agent team coordinator, your task is to create an initial high-level plan (meta-plan) for you ({self.agent_name}) and your teammate ({self.oppo_name}).
+
+		# 		Goal: {goal_desc}
+
+		# 		The final plan should be a step-by-step list outlining which agent should perform which sub-task.
+		# 		Example Format:
+		# 		Step 1: {self.agent_name} explores <room_A>. {self.oppo_name} explores <room_B>.
+		# 		Step 2: {self.agent_name} finds the <object> and puts it in the <target>.
+
+		# 		Now, generate the meta-plan for the given goal.
+		# 		Meta-Plan:
+		# 		"""
+
+
+		if self.debug:
+			print(f"--- Running Initial Meta Plan Generation ---\nPrompt:\n{prompt}")
+
+		# LLM을 호출하여 결과를 받습니다.
+		chat_prompt = [{"role": "user", "content": prompt}]
+		outputs, usage = self.generator(chat_prompt if self.chat else prompt, self.sampling_params)
+		self.total_cost += usage
+		
+		initial_plan = outputs[0]
+		if self.debug:
+			print(f"Generated Initial Plan:\n{initial_plan}")
+			
+		return initial_plan
+
+
+	def run_update_meta_plan(self, current_meta_plan, dialogue_history, progress_desc):
+		"""
+		[Designer 역할] 동료의 피드백과 현재 진행 상황을 반영해 메타 플랜을 수정
+		(Progress-adaptive Planning Module의 일부)
+		"""
+		dialogue_history_desc = '\n'.join(dialogue_history[-3:]) # 최근 대화 3개만 사용
+
+		prompt = f""" 프롬프트 수정해야함 #####################################33
+				You are a cooperative AI agent team coordinator, {self.agent_name}.
+				Your current meta-plan needs to be updated based on feedback from your teammate, {self.oppo_name}, and the latest progress.
+
+				Current Meta-Plan:
+				{current_meta_plan}
+
+				Dialogue History (Your teammate's feedback is here):
+				{dialogue_history_desc}
+
+				Current Progress:
+				{progress_desc}
+
+				Please revise the meta-plan to address the feedback and incorporate the latest progress. The new plan should be more efficient and coordinated.
+				Revised Meta-Plan:
+				"""
+		if self.debug:
+			print(f"--- Running Meta Plan Update ---\nPrompt:\n{prompt}")
+
+		chat_prompt = [{"role": "user", "content": prompt}]
+		outputs, usage = self.generator(chat_prompt if self.chat else prompt, self.sampling_params)
+		self.total_cost += usage
+		
+		updated_plan = outputs[0]
+		if self.debug:
+			print(f"Generated Updated Plan:\n{updated_plan}")
+
+		return updated_plan
+
+	def run_evaluate_meta_plan(self, proposed_plan, progress_desc):
+		"""
+		[Evaluator 역할] 동료가 제안한 메타 플랜을 평가하고 피드백을 생성(동의하는지+피드백))
+		(Communication Module의 일부)
+		"""
+		prompt = f""" 여기도 수정해야함 #####################################33
+				You are a cooperative AI agent, {self.agent_name}. Your teammate, {self.oppo_name}, has proposed a meta-plan.
+				Your task is to evaluate it based on your own knowledge and current progress.
+
+				Proposed Meta-Plan:
+				{proposed_plan}
+
+				Your Current Progress and Observations:
+				{progress_desc}
+
+				Carefully evaluate the plan. Is it efficient? Does it make sense based on what you know?
+				If you fully agree with the plan, start your response with "Consensus: Yes".
+				If you have suggestions for improvement, start your response with "Consensus: No" and provide specific, constructive feedback.
+
+				Your evaluation:
+				"""
+		if self.debug:
+			print(f"--- Running Meta Plan Evaluation ---\nPrompt:\n{prompt}")
+
+		chat_prompt = [{"role": "user", "content": prompt}]
+		outputs, usage = self.generator(chat_prompt if self.chat else prompt, self.sampling_params)
+		self.total_cost += usage
+
+		feedback = outputs[0]
+		if self.debug:
+			print(f"Generated Feedback:\n{feedback}")
+
+		return feedback
+
+	def run_communication_message_designer(self, meta_plan, dialogue_history):  # 지금 이거 이렇게 일일이 prompt를 여기에 적는게 맞는지 확인 필요##########################
+		"""
+		[Designer 역할] 제안/수정한 계획을 동료에게 보내기 위한 메시지를 생성
+		"""
+		message = f"I've created/updated our meta-plan. Please review it and give me your feedback.\n\nPlan:\n{meta_plan}"
+		return message
+
+	def parse_plan_from_message(self, received_message):
+		"""
+		[Evaluator 역할] 동료에게 받은 메시지에서 계획 부분만 추출합니다.
+		"""
+		# 메시지에서 "Plan:"이라는 키워드 이후의 내용을 계획으로 간주합니다.
+		if "Plan:" in received_message:
+			return received_message.split("Plan:")[1].strip()
+		return received_message # "Plan:" 키워드가 없으면 메시지 전체를 계획으로 가정
+
+	def plan_parsing_module(self):
+		"""
+		확정된 메타 플랜과 현재 상태를 기반으로, 지금 당장 실행해야 할 
+		자신의 하위 계획(sub-plan)을 추출합니다. (Plan Parsing Module)
+		"""
+		# 이 부분은 LLM을 호출하여 메타 플랜에서 현재 에이전트의 액션을 파싱해야 함
+		# 예: self.LLM.run_parse_sub_plan(self.meta_plan, self.action_history, self.agent_id)
+		# 여기서는 간단하게 첫 번째 미완료 작업을 가져오는 것으로 가정
+		if self.meta_plan:
+			# 실제 구현에서는 LLM을 통해 파싱해야 합니다.
+			for step in self.meta_plan: # meta_plan이 리스트 형태의 단계라고 가정
+				if f"Agent {self.agent_id}" in step and "completed" not in step:
+					# 예: "Step 1: Agent 1 explores <living_room>" -> "[goexplore] <living_room> (id)"
+					# 이 변환 로직이 필요함.
+					parsed_sub_plan = self.LLM.convert_metastep_to_subplan(step)
+					return parsed_sub_plan
+		return "[wait]" # 수행할 작업이 없을 경우 대기
+
+	def convert_metastep_to_subplan(self, natural_language_step):
+		"""
+		사람이 읽는 메타 플랜의 한 단계(natural language step)를
+		기계가 실행할 수 있는 단일 명령어(sub-plan)로 변환합니다.
+		"""
+		
+		# LLM에게 제공할 지시사항과 예시(Few-shot-learning)를 담은 프롬프트
+		prompt = f"""
+				You are an expert system that converts a natural language command into a machine-readable format.
+				The available machine commands are:
+				- [goexplore] <room_name> (room_id)
+				- [gocheck] <container_name> (container_id)
+				- [gograb] <object_name> (object_id)
+				- [goput] <goal_location_name> (goal_location_id)
+
+				Convert the following "Input" sentences into the correct "Output" format.
+
+				---
+				Input: Agent 1 explores the living room.
+				Output: [goexplore] <living_room> (1)
+
+				Input: Agent 2 should check the fridge.
+				Output: [gocheck] <fridge> (18)
+
+				Input: Agent 1 needs to grab the apple.
+				Output: [gograb] <apple> (34)
+
+				Input: Agent 2 will now put the items into the basket.
+				Output: [goput] <basket> (4)
+				---
+
+				Now, convert the following input sentence. Only provide the single line of output in the correct format.
+
+				Input: {natural_language_step}
+				Output:
+				"""
+
+		if self.debug:
+			print(f"--- Running Meta-step to Sub-plan Conversion ---\nPrompt:\n{prompt}")
+
+		# LLM을 호출하여 변환된 결과를 받습니다.
+		chat_prompt = [{"role": "user", "content": prompt}]
+		# max_tokens를 낮게 설정하여 불필요한 출력을 방지합니다.
+		temp_sampling_params = self.sampling_params.copy()
+		temp_sampling_params["max_tokens"] = 20 
+		
+		outputs, usage = self.generator(chat_prompt if self.chat else prompt, temp_sampling_params)
+		self.total_cost += usage
+		
+		# LLM의 출력에서 첫 번째 줄만 가져와서 반환합니다.
+		parsed_command = outputs[0].strip()
+		
+		if self.debug:
+			print(f"Parsed Command: {parsed_command}")
+
+		return parsed_command
+
+
+# =====================================================================
+# =====================================================================
